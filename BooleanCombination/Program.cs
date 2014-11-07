@@ -33,9 +33,11 @@ namespace BooleanCombination
         /// Reversed TestObject linkage tracker
         /// </summary>
         public static Stack<TestObject> operqueue = new Stack<TestObject>();
-
+        public static bool allow_doubleNOT = false;
         static void Main(string[] args)
         {
+        HEAD:
+            Console.Clear();
             //Read rules
             GridInput(ref Rule_Bool);//TT TF FT FF
             /*-------------DO WORK---------------*/
@@ -52,7 +54,12 @@ namespace BooleanCombination
             //First object and top to bottom
             Console.WriteLine(Recursive_CreatePrint(BoolSetConversion(ref operqueue.Peek().itemA), ref operqueue));
 
-            Console.Read(); //check result with breakpoints
+
+            Console.WriteLine("Redo? Yes: 1 >");
+            string input = Console.ReadLine();
+            if (Regex.IsMatch(input, "1")) goto HEAD;
+
+            
         }
         private static void GridInput(ref bool[] roa)
         {
@@ -63,7 +70,8 @@ namespace BooleanCombination
             Console.WriteLine(Convert(ref T_Bool2) + " - B");
             Console.WriteLine("---- Expected Output");
             input = Console.ReadLine();
-            if (input.Equals("reset")) SetAB();
+            if (input.Equals("setop")) SetOperators(); //change allowed operators
+            if (input.Equals("setab")) SetAB(); //change set A and set B
             if (!Regex.IsMatch(input, "(1|0){4}")) //avoid random input
             {
                 Console.Clear();
@@ -76,6 +84,39 @@ namespace BooleanCombination
             }
             Console.WriteLine();
         }
+
+        private static void SetOperators()
+        {
+            Operator[] def = { Operator.NOT, Operator.AND, Operator.XOR, Operator.OR };
+
+            //NAXO order
+            List<Operator> allowed = new List<Operator>();
+            string[] opers = { "NOT: ", "AND: ", "XOR: ", "OR: " };
+            uint i = 0;
+            while (i<opers.Length)
+            {
+            JUMP:
+                Console.WriteLine("Input 1 or 0 >");
+                Console.WriteLine(opers[i]);
+                string input = Console.ReadLine();
+                if (!Regex.IsMatch(input, "(1|0){1}")) //avoid random input
+                {
+                    Console.Clear();
+                    goto JUMP;
+                }
+                if (input.Equals("1"))
+                {
+                    allowed.Add(def[i]);
+                }
+                i++;
+            }
+            Operators = allowed.ToArray();
+
+            Console.WriteLine("Allow double NOT? 1 or 0 >");
+            string inp = Console.ReadLine();
+            if (inp.Equals("1")) allow_doubleNOT = true;
+        }
+
 
         /// <summary>
         /// Manual set new numbers
@@ -123,38 +164,24 @@ namespace BooleanCombination
         /// Solves the problem
         /// </summary>
         /// <returns>Solution-holding TestObject</returns>
-        private static TestObject Solve()
+        private static TestObject Solve(int queuemax = 5)
         {
             TestObject to = new TestObject(T_Bool1,T_Bool2,Operator.NONE); //processing container
 
+            //NAXO
 
-            TestObject none_to = new TestObject(T_Bool1, T_Bool1, Operator.NONE),
-                       none_to2 = new TestObject(T_Bool2, T_Bool2, Operator.NONE),
-                       n_to = new TestObject(T_Bool1, T_Bool2, Operator.NOT),
-                       a_to = new TestObject(T_Bool1, T_Bool2, Operator.AND),
-                       x_to = new TestObject(T_Bool1, T_Bool2, Operator.XOR),
-                       o_to = new TestObject(T_Bool1, T_Bool2, Operator.OR),
-                       
-                       n_to2 = n_to,
-                       o_to2 = o_to,
-                       x_to2 = x_to,
-                       a_to2 = a_to;
+            TestObject[] toa = new TestObject[Operators.Length * T_Bools.Length]; //n * 2
+            uint i = 0;
+            foreach (Operator op in Operators)
+            {
+                toa[i++] = new TestObject(T_Bool1, T_Bool2, op);
+                toa[i++] = new TestObject(T_Bool2, T_Bool1, op);
+            }
 
-                       
 
             //add only the 
-            Queue<TestObject> queue = new Queue<TestObject>();
-            queue.Enqueue(none_to); //avoid input A
-            queue.Enqueue(none_to2); //avoid input B            
-
+            Queue<TestObject> queue = new Queue<TestObject>(toa);
             
-
-            TestObject[] toa = { n_to,  a_to,  x_to,  o_to, 
-                                 n_to2, a_to2, x_to2, o_to2};
-            foreach (TestObject item in toa)
-            {
-                queue.Enqueue(item);
-            }
             while (queue.Count > 0)
             {
                 to = queue.Dequeue();
@@ -163,13 +190,20 @@ namespace BooleanCombination
                 if (Check(ref Rule_Bool, ref to.result)) break;
 
                 
-                for (int a = 0; a < 2; a++)
+                for (int a = 0; a < T_Bools.Length; a++)
                 {
-                    for (int i = 0; i < 4; i++)
+                    for (int j = 0; j < Operators.Length; j++)
                     {
-                        toa[(a * 4) + i] = new TestObject(to, T_Bools[a], Operators[i]);   
+                        if (!allow_doubleNOT && ((to.oper & Operators[j]) == Operator.NOT)) continue; //skip same
+                        toa[(a * Operators.Length) + j] = new TestObject(to, T_Bools[a], Operators[j]);   
+                        
                         //MUST create a new TestObject when chaining or else the parent is always re-linked back to itself
-                        queue.Enqueue(toa[(a * 4) + i]);
+                        queue.Enqueue(toa[(a * Operators.Length) + j]);
+
+                        if (toa[(a * Operators.Length) + j].Level == queuemax)
+                        {
+                            break; //safety lock to avoid infinite loop
+                        }
                     }
                 }
             }
@@ -253,6 +287,7 @@ namespace BooleanCombination
         public class TestObject
         {
             public bool[] itemA, itemB, result;
+            public uint Level { get; private set; }
 
             public TestObject parent;
             public bool isNull = false;
@@ -264,6 +299,7 @@ namespace BooleanCombination
                 itemA = a;
                 itemB = b;
                 oper = op;
+                Level = 0;
                 result = new bool[4];
             }
             public TestObject(TestObject par, bool[] b, Operator op)
@@ -272,6 +308,7 @@ namespace BooleanCombination
                 itemA = parent.result;
                 itemB = b;
                 oper = op;
+                Level = parent.Level + 1;
                 result = new bool[4];
             }
             public void Solve()
